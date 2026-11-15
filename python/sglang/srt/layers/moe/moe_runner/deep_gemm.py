@@ -295,7 +295,9 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         if self._fi_moe_ep_overlay:
             # w13 is stored gate/up 8-row interleaved (shared with FlashInfer moe_ep);
             # the masked decode path reads it through the swizzle-aware SwiGLU.
-            assert self.use_fused_activation, "SGLANG_FI_MOE_EP needs SGLANG_OPT_USE_JIT_EP_ACTIVATION"
+            assert (
+                self.use_fused_activation
+            ), "SGLANG_FI_MOE_EP needs SGLANG_OPT_USE_JIT_EP_ACTIVATION"
             self.use_swizzle = True
 
     def run(

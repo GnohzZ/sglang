@@ -74,8 +74,8 @@ import dataclasses
 import functools
 import logging
 import os
-from contextlib import nullcontext
 import time
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Optional
 
 import torch
@@ -170,7 +170,11 @@ def _check_caller_rows_mapping(*, world: int, rank: int) -> None:
         is_dp_attention_enabled,
     )
 
-    if not is_dp_attention_enabled() or get_attention_dp_size() != world or get_attention_dp_rank() != rank:
+    if (
+        not is_dp_attention_enabled()
+        or get_attention_dp_size() != world
+        or get_attention_dp_rank() != rank
+    ):
         raise RuntimeError(
             f"{ENV_CALLER_ROWS}=1 needs DP attention with DP rank == EP rank (EP{world} rank {rank}); "
             f"set {ENV_CALLER_ROWS}=0"
@@ -185,10 +189,14 @@ def _check_caller_rows_mapping(*, world: int, rank: int) -> None:
 def _ue8m0_bytes(scale: torch.Tensor) -> torch.Tensor:
     """FP32 power-of-two block scales -> UE8M0 exponent bytes (exact; refuses anything else)."""
     if scale.dtype != torch.float32:
-        raise RuntimeError(f"{ENV_KERNEL}: expected fp32 FP4 block scales, got {scale.dtype}")
+        raise RuntimeError(
+            f"{ENV_KERNEL}: expected fp32 FP4 block scales, got {scale.dtype}"
+        )
     bits = scale.contiguous().view(torch.int32)
     if bool(((bits & 0x807FFFFF) != 0).any()):
-        raise RuntimeError(f"{ENV_KERNEL}: FP4 block scales are not positive powers of two")
+        raise RuntimeError(
+            f"{ENV_KERNEL}: FP4 block scales are not positive powers of two"
+        )
     return ((bits >> 23) & 0xFF).to(torch.uint8)
 
 
@@ -196,23 +204,38 @@ def _transport_table(name: str, world: int):
     if name != "lsa_pairs":
         return name
     return tuple(
-        0 if a == b else (1 if a // 2 == b // 2 else 2) for a in range(world) for b in range(world)
+        0 if a == b else (1 if a // 2 == b // 2 else 2)
+        for a in range(world)
+        for b in range(world)
     )
 
 
 def _megakernel_config_nvfp4(
-    *, intermediate: int, top_k: int, swiglu_limit: Optional[float], world: int, alpha1, alpha2, norm
+    *,
+    intermediate: int,
+    top_k: int,
+    swiglu_limit: Optional[float],
+    world: int,
+    alpha1,
+    alpha2,
+    norm,
 ):
     from flashinfer.moe_ep import Sm120_Nvfp4_Nvfp4_Bf16_Cake_MegaMoeConfig
 
     limit = 0 if swiglu_limit is None else int(swiglu_limit)
     if swiglu_limit is not None and float(limit) != float(swiglu_limit):
-        raise RuntimeError(f"{ENV_KERNEL}=cake_nvfp4: swiglu_limit {swiglu_limit} is not an integer")
+        raise RuntimeError(
+            f"{ENV_KERNEL}=cake_nvfp4: swiglu_limit {swiglu_limit} is not an integer"
+        )
     extra = {}
-    fields = {f.name for f in dataclasses.fields(Sm120_Nvfp4_Nvfp4_Bf16_Cake_MegaMoeConfig)}
+    fields = {
+        f.name for f in dataclasses.fields(Sm120_Nvfp4_Nvfp4_Bf16_Cake_MegaMoeConfig)
+    }
     if _kernel_sched():
         if "kernel_sched" not in fields:
-            raise RuntimeError(f"{ENV_KERNEL_SCHED}=1: this FlashInfer tree has no kernel_sched config")
+            raise RuntimeError(
+                f"{ENV_KERNEL_SCHED}=1: this FlashInfer tree has no kernel_sched config"
+            )
         extra["kernel_sched"] = True
     codec = os.environ.get(ENV_RETURN_CODEC, "").strip()
     if codec:
@@ -233,7 +256,12 @@ def _megakernel_config_nvfp4(
 
 
 def _megakernel_config(
-    *, intermediate: int, top_k: int, swiglu_limit: Optional[float], world: int, kernel: str = "cake"
+    *,
+    intermediate: int,
+    top_k: int,
+    swiglu_limit: Optional[float],
+    world: int,
+    kernel: str = "cake",
 ):
     """cake (W4A8) or cake_mxfp4 (W4A4 MXFP4 activations): same fields, same weight pack."""
     if kernel == "cake_mxfp4":
@@ -242,7 +270,9 @@ def _megakernel_config(
                 Sm120_Mxfp4_Mxfp4_Bf16_Cake_MegaMoeConfig as Sm120_Mxfp4_Mxfp8_Bf16_Cake_MegaMoeConfig,
             )
         except ImportError as exc:
-            raise RuntimeError(f"{ENV_KERNEL}=cake_mxfp4: this FlashInfer tree has no MXFP4 W4A4 backend") from exc
+            raise RuntimeError(
+                f"{ENV_KERNEL}=cake_mxfp4: this FlashInfer tree has no MXFP4 W4A4 backend"
+            ) from exc
     else:
         from flashinfer.moe_ep.backends.mega.kernel.sm120.mxfp4_mxfp8_bf16_cake import (
             Sm120_Mxfp4_Mxfp8_Bf16_Cake_MegaMoeConfig,
@@ -250,17 +280,25 @@ def _megakernel_config(
 
     limit = 0 if swiglu_limit is None else int(swiglu_limit)
     if swiglu_limit is not None and float(limit) != float(swiglu_limit):
-        raise RuntimeError(f"{ENV_KERNEL}={kernel}: swiglu_limit {swiglu_limit} is not an integer")
+        raise RuntimeError(
+            f"{ENV_KERNEL}={kernel}: swiglu_limit {swiglu_limit} is not an integer"
+        )
     extra = {}
-    fields = {f.name for f in dataclasses.fields(Sm120_Mxfp4_Mxfp8_Bf16_Cake_MegaMoeConfig)}
+    fields = {
+        f.name for f in dataclasses.fields(Sm120_Mxfp4_Mxfp8_Bf16_Cake_MegaMoeConfig)
+    }
     if _kernel_sched():
         if "kernel_sched" not in fields:
-            raise RuntimeError(f"{ENV_KERNEL_SCHED}=1: this FlashInfer tree has no kernel_sched config")
+            raise RuntimeError(
+                f"{ENV_KERNEL_SCHED}=1: this FlashInfer tree has no kernel_sched config"
+            )
         extra["kernel_sched"] = True
     codec = os.environ.get(ENV_RETURN_CODEC, "").strip()
     if codec:
         if "return_codec" not in fields:
-            raise RuntimeError(f"{ENV_RETURN_CODEC}={codec}: this FlashInfer tree has no return_codec config")
+            raise RuntimeError(
+                f"{ENV_RETURN_CODEC}={codec}: this FlashInfer tree has no return_codec config"
+            )
         extra["return_codec"] = codec
     return Sm120_Mxfp4_Mxfp8_Bf16_Cake_MegaMoeConfig(
         intermediate_size=intermediate,
@@ -283,13 +321,21 @@ def _shared_filler(tensor: torch.Tensor, cache: dict) -> torch.Tensor:
 _FILLERS: dict = {}
 
 
-def _transform_aliasing(pack, w13_u8: torch.Tensor, w2_u8: torch.Tensor, *, hidden: int, intermediate: int):
+def _transform_aliasing(
+    pack, w13_u8: torch.Tensor, w2_u8: torch.Tensor, *, hidden: int, intermediate: int
+):
     """Kernel preprocessing of the canonical pack; FC1/FC2 then alias the layer's (interleaved) w13 / w2 storage."""
-    from flashinfer.moe_ep.backends.mega.kernel.sm120.mxfp4_mxfp8_bf16_cake import preprocess_mega_weights
+    from flashinfer.moe_ep.backends.mega.kernel.sm120.mxfp4_mxfp8_bf16_cake import (
+        preprocess_mega_weights,
+    )
 
-    tw = preprocess_mega_weights(pack, hidden_size=hidden, intermediate_size=intermediate)
+    tw = preprocess_mega_weights(
+        pack, hidden_size=hidden, intermediate_size=intermediate
+    )
     w13_u8.copy_(tw.w1_fp4.view(torch.uint8))
-    if tw.w2_fp4.data_ptr() != w2_u8.data_ptr() and not torch.equal(tw.w2_fp4.view(torch.uint8), w2_u8):
+    if tw.w2_fp4.data_ptr() != w2_u8.data_ptr() and not torch.equal(
+        tw.w2_fp4.view(torch.uint8), w2_u8
+    ):
         raise RuntimeError(f"{ENV_KERNEL}=cake: FC2 is not the canonical w2 layout")
     return dataclasses.replace(
         tw,
@@ -312,22 +358,38 @@ def _nvfp4_norm(layer_id: int, num_experts: int, rank: int, local: int, device):
         _NORMS[path] = torch.load(path, map_location="cpu")
     full = _NORMS[path][layer_id].to(torch.float32)
     if full.numel() != num_experts:
-        raise RuntimeError(f"{ENV_NVFP4_NORM_FILE}: layer {layer_id} has {full.numel()} norms, expected {num_experts}")
+        raise RuntimeError(
+            f"{ENV_NVFP4_NORM_FILE}: layer {layer_id} has {full.numel()} norms, expected {num_experts}"
+        )
     return full[rank * local : (rank + 1) * local].contiguous().to(device)
 
 
-def _transform_nvfp4_aliasing(layer, w13_u8: torch.Tensor, w2_u8: torch.Tensor, *, hidden: int, intermediate: int):
+def _transform_nvfp4_aliasing(
+    layer, w13_u8: torch.Tensor, w2_u8: torch.Tensor, *, hidden: int, intermediate: int
+):
     """MXFP4 pack -> exact NVFP4 (per-expert shifted E4M3 scales + alpha) -> kernel layout; FC1/FC2 alias w13 / w2."""
     from flashinfer.moe_ep import MoEWeightPack, mxfp4_scales_to_nvfp4_shifted
-    from flashinfer.moe_ep.backends.mega.kernel.sm120.nvfp4_nvfp4_bf16_cake import preprocess_nvfp4_mega_weights
+    from flashinfer.moe_ep.backends.mega.kernel.sm120.nvfp4_nvfp4_bf16_cake import (
+        preprocess_nvfp4_mega_weights,
+    )
 
-    sc13, alpha1 = mxfp4_scales_to_nvfp4_shifted(_ue8m0_bytes(layer.w13_weight_scale_inv.data))
-    sc2, alpha2 = mxfp4_scales_to_nvfp4_shifted(_ue8m0_bytes(layer.w2_weight_scale_inv.data))
+    sc13, alpha1 = mxfp4_scales_to_nvfp4_shifted(
+        _ue8m0_bytes(layer.w13_weight_scale_inv.data)
+    )
+    sc2, alpha2 = mxfp4_scales_to_nvfp4_shifted(
+        _ue8m0_bytes(layer.w2_weight_scale_inv.data)
+    )
     pack = MoEWeightPack(w13_u8, w2_u8, sc13, sc2)
-    tw = preprocess_nvfp4_mega_weights(pack, hidden_size=hidden, intermediate_size=intermediate)
+    tw = preprocess_nvfp4_mega_weights(
+        pack, hidden_size=hidden, intermediate_size=intermediate
+    )
     w13_u8.copy_(tw.w1_fp4.view(torch.uint8))
-    if tw.w2_fp4.data_ptr() != w2_u8.data_ptr() and not torch.equal(tw.w2_fp4.view(torch.uint8), w2_u8):
-        raise RuntimeError(f"{ENV_KERNEL}=cake_nvfp4: FC2 is not the canonical w2 layout")
+    if tw.w2_fp4.data_ptr() != w2_u8.data_ptr() and not torch.equal(
+        tw.w2_fp4.view(torch.uint8), w2_u8
+    ):
+        raise RuntimeError(
+            f"{ENV_KERNEL}=cake_nvfp4: FC2 is not the canonical w2 layout"
+        )
     tw = dataclasses.replace(
         tw,
         w1_fp4=w13_u8.view(tw.w1_fp4.dtype),
@@ -372,7 +434,9 @@ def _deepgemm_scales_interleaved(layer, *, index: torch.Tensor) -> None:
     sf13 = layer.w13_weight_scale_inv.data
     e, n1, kb1 = sf13.shape
     if tuple(sf13.stride()) != (kb1 * n1, 1, n1):
-        raise RuntimeError(f"{ENV_KERNEL}: DeepGEMM w13 scales are not mn-major (strides {tuple(sf13.stride())})")
+        raise RuntimeError(
+            f"{ENV_KERNEL}: DeepGEMM w13 scales are not mn-major (strides {tuple(sf13.stride())})"
+        )
     phys = sf13.as_strided((e, kb1, n1), (kb1 * n1, n1, 1))
     for i in range(e):
         phys[i].copy_(phys[i].index_select(1, index))
@@ -390,7 +454,9 @@ class _ConversionPool:
     default-pool memory, and ``close()`` releases the private segments."""
 
     def __init__(self) -> None:
-        self.pool = torch.cuda.MemPool() if os.environ.get(ENV_LOAD_POOL, "1") == "1" else None
+        self.pool = (
+            torch.cuda.MemPool() if os.environ.get(ENV_LOAD_POOL, "1") == "1" else None
+        )
 
     def __enter__(self):
         self._released = False
@@ -413,7 +479,9 @@ class _ConversionPool:
             # segments): a copy carved out of one would pin the rest of it
             torch.cuda.empty_cache()
             self._released = True
-        copy = torch.empty_strided(tensor.shape, tensor.stride(), dtype=tensor.dtype, device=tensor.device)
+        copy = torch.empty_strided(
+            tensor.shape, tensor.stride(), dtype=tensor.dtype, device=tensor.device
+        )
         copy.copy_(tensor)
         return copy
 
@@ -423,7 +491,7 @@ class _ConversionPool:
             torch.cuda.empty_cache()
 
 
-def _transformed_out(tw, conv: "_ConversionPool", keep_storage: tuple):
+def _transformed_out(tw, conv: _ConversionPool, keep_storage: tuple):
     """Copy every tensor field of the transformed weights out of the conversion pool, except the aliased w13 / w2
     (``keep_storage``) and the shared constant fillers (FlashInfer caches them per device; created in the default
     pool by ``_warm_fillers``)."""
@@ -439,12 +507,17 @@ def _transformed_out(tw, conv: "_ConversionPool", keep_storage: tuple):
 
 def _warm_fillers(device, hidden: int, intermediate: int) -> None:
     """Create FlashInfer's per-device constant filler operands (noshared variant) in the default pool, before the first
-    pooled conversion would put them (permanently, pinning two private segments) into the private pool."""
+    pooled conversion would put them (permanently, pinning two private segments) into the private pool.
+    """
     try:
-        from flashinfer.moe_ep.backends.mega.kernel.sm120.mxfp4_mxfp8_bf16_cake.cake_weights import _noshared_operands
+        from flashinfer.moe_ep.backends.mega.kernel.sm120.mxfp4_mxfp8_bf16_cake.cake_weights import (
+            _noshared_operands,
+        )
     except ImportError:
         try:
-            from flashinfer.moe_ep.backends.mega.kernel.sm120.mxfp4_mxfp8_bf16_cake.weights import _noshared_operands
+            from flashinfer.moe_ep.backends.mega.kernel.sm120.mxfp4_mxfp8_bf16_cake.weights import (
+                _noshared_operands,
+            )
         except ImportError:
             return
     for t in _noshared_operands(device, hidden, intermediate):
@@ -456,7 +529,10 @@ def _deepgemm_path_reachable() -> bool:
     DeepGEMM-layout scales).  With SGLANG_FI_MOE_EP_DECODE=1 every non-captured step takes the FlashInfer layer, so the
     DeepGEMM path is only reached from captured CUDA graphs; runtime EPLB rebalancing also moves the scale
     parameters between ranks."""
-    if os.environ.get(ENV_KEEP_DG_SCALES, "0") == "1" or os.environ.get(ENV_DECODE, "0") != "1":
+    if (
+        os.environ.get(ENV_KEEP_DG_SCALES, "0") == "1"
+        or os.environ.get(ENV_DECODE, "0") != "1"
+    ):
         return True
     from sglang.srt.model_executor.cuda_graph_config import Backend
     from sglang.srt.server_args import get_global_server_args
@@ -481,8 +557,15 @@ def _drop_deepgemm_scales(layer) -> None:
 
 def build_fi_moe_ep_experts_weights(layer) -> None:
     """Fp8MoEMethod.process_weights_after_loading hook for FP4 experts under the overlay (replaces the baseline's
-    DeepGEMM scale packing, which it performs itself after the FlashInfer layer is built)."""
-    from flashinfer.moe_ep import BootstrapConfig, FleetParams, MegaConfig, MoEEpLayer, MoEWeightPack
+    DeepGEMM scale packing, which it performs itself after the FlashInfer layer is built).
+    """
+    from flashinfer.moe_ep import (
+        BootstrapConfig,
+        FleetParams,
+        MegaConfig,
+        MoEEpLayer,
+        MoEWeightPack,
+    )
 
     from sglang.srt.distributed.parallel_state import get_moe_ep_group
 
@@ -496,7 +579,9 @@ def build_fi_moe_ep_experts_weights(layer) -> None:
         )
     w13, w2 = layer.w13_weight.data, layer.w2_weight.data
     if w13.dtype != torch.int8 or w2.dtype != torch.int8:
-        raise RuntimeError(f"{ENV_KERNEL}: expected packed E2M1 int8 experts, got {w13.dtype}/{w2.dtype}")
+        raise RuntimeError(
+            f"{ENV_KERNEL}: expected packed E2M1 int8 experts, got {w13.dtype}/{w2.dtype}"
+        )
     e, n1, half_h = w13.shape
     hidden, intermediate = 2 * half_h, n1 // 2
     w13_u8, w2_u8 = w13.view(torch.uint8), w2.view(torch.uint8)
@@ -511,7 +596,9 @@ def build_fi_moe_ep_experts_weights(layer) -> None:
         _ue8m0_bytes(layer.w2_weight_scale_inv.data),
     )
     index = _interleave_index(intermediate, w13.device)
-    check_layout = not _Stats.layers  # one-time cross-check of the shared FC1 layout on the first layer
+    check_layout = (
+        not _Stats.layers
+    )  # one-time cross-check of the shared FC1 layout on the first layer
     reference = w13_u8.index_select(1, index) if check_layout else None
     nv = kernel == "cake_nvfp4"
     if nv:
@@ -519,10 +606,14 @@ def build_fi_moe_ep_experts_weights(layer) -> None:
             layer, w13_u8, w2_u8, hidden=hidden, intermediate=intermediate
         )
     else:
-        transformed = _transform_aliasing(pack, w13_u8, w2_u8, hidden=hidden, intermediate=intermediate)
+        transformed = _transform_aliasing(
+            pack, w13_u8, w2_u8, hidden=hidden, intermediate=intermediate
+        )
     if reference is not None:
         if not torch.equal(reference, w13_u8):
-            raise RuntimeError(f"{ENV_KERNEL}={kernel}: FC1 layout differs from the DeepGEMM gate/up 8-row interleave")
+            raise RuntimeError(
+                f"{ENV_KERNEL}={kernel}: FC1 layout differs from the DeepGEMM gate/up 8-row interleave"
+            )
         del reference
     conv.__exit__(None, None, None)
     transformed = _transformed_out(transformed, conv, (w13_u8, w2_u8))
@@ -533,15 +624,22 @@ def build_fi_moe_ep_experts_weights(layer) -> None:
     world = torch.distributed.get_world_size(group)
     rank = torch.distributed.get_rank(group)
     if world != ep_size:
-        raise RuntimeError(f"{ENV_KERNEL}: MoE EP group size {world} != moe_ep_size {ep_size}")
+        raise RuntimeError(
+            f"{ENV_KERNEL}: MoE EP group size {world} != moe_ep_size {ep_size}"
+        )
     if _caller_rows():
         _check_caller_rows_mapping(world=world, rank=rank)
     layer.fi_moe_ep_layer = MoEEpLayer(
         bootstrap=BootstrapConfig(
-            world_size=world, rank=rank, device=torch.cuda.current_device(), process_group=group
+            world_size=world,
+            rank=rank,
+            device=torch.cuda.current_device(),
+            process_group=group,
         ),
         fleet_params=FleetParams(
-            num_experts=num_experts, max_tokens_per_rank=_max_rows(), token_hidden_size=hidden
+            num_experts=num_experts,
+            max_tokens_per_rank=_max_rows(),
+            token_hidden_size=hidden,
         ),
         weights=pack,  # not stored when transformed_weights is supplied
         backend=MegaConfig(
@@ -586,10 +684,25 @@ def build_fi_moe_ep_experts_weights(layer) -> None:
         logger.info(
             "%s=%s: built %d MoE layers (EP%d rank %d, %d local experts, max_rows %d, kernel_sched %d, return_codec %s, "
             "rows API %s, %.1fs)",
-            ENV_KERNEL, kernel, len(_Stats.layers), world, rank, e, _max_rows(), int(_kernel_sched()),
+            ENV_KERNEL,
+            kernel,
+            len(_Stats.layers),
+            world,
+            rank,
+            e,
+            _max_rows(),
+            int(_kernel_sched()),
             os.environ.get(ENV_RETURN_CODEC, "") or "default",
-            ("tensors" if _tensors_take_rows() else ("bound+hint" if _stage_takes_rows_hint() else "bound"))
-            if _caller_rows() else "gather", _Stats.seconds_build,
+            (
+                (
+                    "tensors"
+                    if _tensors_take_rows()
+                    else ("bound+hint" if _stage_takes_rows_hint() else "bound")
+                )
+                if _caller_rows()
+                else "gather"
+            ),
+            _Stats.seconds_build,
         )
 
 
@@ -598,11 +711,15 @@ def build_fi_moe_ep_experts_weights(layer) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def should_use_fi_moe_ep(moe: "DeepseekV2MoE", forward_batch: Optional["ForwardBatch"]) -> bool:
+def should_use_fi_moe_ep(
+    moe: DeepseekV2MoE, forward_batch: Optional[ForwardBatch]
+) -> bool:
     if not fi_moe_ep_overlay_enabled():
         return False
     if not getattr(moe.experts, "_fi_moe_ep_built", False):
-        raise RuntimeError(f"{ENV_KERNEL}: layer {moe.layer_id} has no FlashInfer moe_ep layer (FP4 experts required)")
+        raise RuntimeError(
+            f"{ENV_KERNEL}: layer {moe.layer_id} has no FlashInfer moe_ep layer (FP4 experts required)"
+        )
     if os.environ.get(ENV_DECODE, "0") == "1" and not get_is_capture_mode():
         return True
     if getattr(moe.experts, "_fi_moe_ep_dg_dropped", False):
@@ -618,9 +735,9 @@ def should_use_fi_moe_ep(moe: "DeepseekV2MoE", forward_batch: Optional["ForwardB
 
 
 def forward_fi_moe_ep(
-    moe: "DeepseekV2MoE",
+    moe: DeepseekV2MoE,
     hidden_states: torch.Tensor,
-    forward_batch: Optional["ForwardBatch"] = None,
+    forward_batch: Optional[ForwardBatch] = None,
     input_ids_global: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     from flashinfer.moe_ep import MoEEpTensors
@@ -629,19 +746,34 @@ def forward_fi_moe_ep(
     num_tokens = int(hidden_states.shape[0])
     top_k = int(experts.top_k)
     shared_output = None
-    rows_by_rank = forward_batch.global_num_tokens_cpu if (forward_batch is not None and _caller_rows()) else None
+    rows_by_rank = (
+        forward_batch.global_num_tokens_cpu
+        if (forward_batch is not None and _caller_rows())
+        else None
+    )
     if num_tokens > 0:
         router_logits = moe.gate(hidden_states, forward_batch=forward_batch)
-        topk_kwargs = {"input_ids": input_ids_global} if getattr(moe, "is_hash", False) else {}
+        topk_kwargs = (
+            {"input_ids": input_ids_global} if getattr(moe, "is_hash", False) else {}
+        )
         # the DeepSeek-V4 layer loop already holds the recorder's current layer (nested with_value asserts)
         _rec = get_global_expert_distribution_recorder()
-        _held = getattr(getattr(_rec, "_current_layer_idx", None), "value", None) is not None
-        with (nullcontext() if _held else _rec.with_current_layer(moe.layer_id)):
+        _held = (
+            getattr(getattr(_rec, "_current_layer_idx", None), "value", None)
+            is not None
+        )
+        with nullcontext() if _held else _rec.with_current_layer(moe.layer_id):
             topk_output = moe.topk(
                 hidden_states,
                 router_logits,
-                num_token_non_padded=(forward_batch.num_token_non_padded if forward_batch is not None else None),
-                expert_location_dispatch_info=ExpertLocationDispatchInfo.init_new(layer_id=moe.layer_id),
+                num_token_non_padded=(
+                    forward_batch.num_token_non_padded
+                    if forward_batch is not None
+                    else None
+                ),
+                expert_location_dispatch_info=ExpertLocationDispatchInfo.init_new(
+                    layer_id=moe.layer_id
+                ),
                 **topk_kwargs,
             )
         topk_ids = topk_output.topk_ids.to(torch.int64).contiguous()
@@ -651,22 +783,38 @@ def forward_fi_moe_ep(
         topk_weights = topk_weights.contiguous()
         shared_output = moe._forward_shared_experts(hidden_states)
     else:
-        topk_ids = torch.empty((0, top_k), dtype=torch.int64, device=hidden_states.device)
-        topk_weights = torch.empty((0, top_k), dtype=torch.float32, device=hidden_states.device)
+        topk_ids = torch.empty(
+            (0, top_k), dtype=torch.int64, device=hidden_states.device
+        )
+        topk_weights = torch.empty(
+            (0, top_k), dtype=torch.float32, device=hidden_states.device
+        )
 
     # Collective on the EP group: every rank calls it for every MoE layer of the step, also with 0 tokens.
     if _caller_rows():
         if rows_by_rank is None:
-            raise RuntimeError(f"{ENV_CALLER_ROWS}=1: the forward batch carries no global_num_tokens_cpu")
+            raise RuntimeError(
+                f"{ENV_CALLER_ROWS}=1: the forward batch carries no global_num_tokens_cpu"
+            )
     fi_layer = experts.fi_moe_ep_layer
     if rows_by_rank is not None and not _tensors_take_rows():
         tensors = MoEEpTensors(
-            hidden_states=hidden_states.contiguous(), topk_ids=topk_ids, topk_weights=topk_weights
+            hidden_states=hidden_states.contiguous(),
+            topk_ids=topk_ids,
+            topk_weights=topk_weights,
         )
         # Owned output allocated before staging, as MoEEpMegaLayer.forward does.
         out = torch.empty_like(tensors.hidden_states, dtype=torch.bfloat16)
-        rows_kw = {"rows_by_rank": [int(r) for r in rows_by_rank]} if _stage_takes_rows_hint() else {}
-        fi_layer.stage_inputs(tensors, compile_tokens_per_rank=max(int(r) for r in rows_by_rank), **rows_kw)
+        rows_kw = (
+            {"rows_by_rank": [int(r) for r in rows_by_rank]}
+            if _stage_takes_rows_hint()
+            else {}
+        )
+        fi_layer.stage_inputs(
+            tensors,
+            compile_tokens_per_rank=max(int(r) for r in rows_by_rank),
+            **rows_kw,
+        )
         routed = fi_layer.compute_staged(output=out)
     else:
         rows_kw = {} if rows_by_rank is None else {"num_tokens_per_rank": rows_by_rank}
@@ -706,5 +854,11 @@ def _after_call(experts, num_tokens: int) -> None:
     if _Stats.calls == 1 or (log_every > 0 and _Stats.calls % log_every == 0):
         logger.info(
             "%s=%s: %d layer calls, %d rows (max %d per call, %d empty calls), protocol_error checks %d (all 0)",
-            ENV_KERNEL, kernel, _Stats.calls, _Stats.rows, _Stats.max_rows, _Stats.empty_calls, _Stats.checks,
+            ENV_KERNEL,
+            kernel,
+            _Stats.calls,
+            _Stats.rows,
+            _Stats.max_rows,
+            _Stats.empty_calls,
+            _Stats.checks,
         )
